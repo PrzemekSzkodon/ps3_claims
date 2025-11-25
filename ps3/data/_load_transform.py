@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 def load_transform():
     """Load and transform data from OpenML.
 
@@ -69,3 +68,7 @@ def load_transform():
     df = df.reset_index()
 
     return df
+
+data = load_transform()
+pd.set_option('display.max_columns', None)
+print(data.describe(include='all'))
