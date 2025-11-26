@@ -1,3 +1,16 @@
+# Run this in the same notebook/interpreter where you click "Run Cell"
+import sys, os, importlib, site
+
+print("sys.executable:", sys.executable)          # Interpreter path used by the kernel
+print("sys.version:", sys.version.splitlines()[0])
+print("cwd:", os.getcwd())                        # Current working directory
+print("sys.path head:", sys.path[:5])             # First few entries of sys.path
+spec = importlib.util.find_spec("ps3")
+print("ps3 spec:", spec)
+if spec:
+    print("ps3 origin:", spec.origin)
+    print("ps3 package dirs:", spec.submodule_search_locations)
+print("site packages:", getattr(site, 'getsitepackages', lambda: 'NA')())
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
