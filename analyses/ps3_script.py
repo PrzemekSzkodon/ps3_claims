@@ -138,18 +138,26 @@ print(
 )
 
 # %%
-# Explore the data: check dimensions and preview the first few rows
-df_train.head()  # Displays the first 5 rows to understand the data structure
-df_test.head()  # Displays the first 5 rows to understand the data structure
+# Display coefficients with approximate statistics
+# Note: glum doesn't provide SEs directly, so we show coefficients and their relative magnitude
 
-plt.figure(figsize=(10, 6))
-plt.hist(df_test["pp_t_glm1"], bins=50, alpha=0.5, label="Train Predictions")
-plt.xlabel("Predicted Pure Premium")
-plt.ylabel("Frequency")
-plt.title("Distribution of Predicted Pure Premiums")
-plt.legend()
-plt.show()
+coef_df = pd.DataFrame(
+    {
+        "coefficient": np.concatenate(([t_glm1.intercept_], t_glm1.coef_)),
+        "abs_coefficient": np.abs(np.concatenate(([t_glm1.intercept_], t_glm1.coef_)))
+    },
+    index=["intercept"] + t_glm1.feature_names_,
+)
 
+# Sort by absolute value to see most influential features
+coef_df.sort_values("abs_coefficient", ascending=False).head(6)
+
+# %%
+# Compare train and test distributions side by side
+pd.concat([
+    df_train["pp_t_glm1"].describe(percentiles=[.1, .25, .5, .75, .9, .95, .99]),
+    df_test["pp_t_glm1"].describe(percentiles=[.1, .25, .5, .75, .9, .95, .99])
+], axis=1, keys=['Train', 'Test'])
 # %%
 # TODO: Let's add splines for BonusMalus and Density and use a Pipeline.
 # Steps: 
