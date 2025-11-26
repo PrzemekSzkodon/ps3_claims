@@ -106,17 +106,18 @@ def load_transform():
     """
 
     # Local fallback paths (script directory)
-    this_dir = os.path.dirname(__file__)
-    local_freq = os.path.join(this_dir, "freMTPL2freq.csv")
-    local_sev = os.path.join(this_dir, "freMTPL2sev.csv")
+    this_dir = os.path.dirname(__file__) # __file__ is the path to this script
+    local_freq = os.path.join(this_dir, "freMTPL2freq.csv") #this gets the path to the freq csv
+    local_sev = os.path.join(this_dir, "freMTPL2sev.csv") #this gets the path to the sev csv
 
     # Load the data using the helper that tries several fallbacks.
     # df: frequency dataset (one row per policy)
     # df_sev: severity dataset (one row per claim; index refers to policy)
     # source: a short string explaining which path was used (for debugging)
-    df, df_sev, source = _read_local_or_remote(local_freq, local_sev)
+    df, df_sev, source = _read_local_or_remote(local_freq, local_sev) #three variables called in one go 
+
     # Keep a module-level record of where the data came from for debugging
-    global _LAST_LOAD_SOURCE
+    global _LAST_LOAD_SOURCE #
     _LAST_LOAD_SOURCE = source
 
     # Clean column names: remove surrounding quotes if present. The raw files

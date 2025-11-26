@@ -26,8 +26,6 @@ def create_sample_split(df, id_column, training_frac=0.8):
 
     def assign_split(id_value):
         
-        id_value = '_'.join(id_value)
-        
         #take some id value and ensure it's a string
         id_string = str(id_value)
 
@@ -37,8 +35,11 @@ def create_sample_split(df, id_column, training_frac=0.8):
         # create a hash using the the bytes - the hash is some long hex string
         hash_object = hashlib.md5(id_bytes)
 
+        # Create hash object to a hex string
+        hash_hex = hash_object.hexdigest()
+
         # then we convert the hash (which is a hex string made up of letters and numbers) into a long interger
-        hash_int = int(hash_object, 16)
+        hash_int = int(hash_hex, 16)
 
         #then we assign the hash int into a bucket - % 100 taks the last 2 numbers, and this is a good
         #enough approach because the hash distribution is so large and random the distirbution should be
@@ -54,6 +55,6 @@ def create_sample_split(df, id_column, training_frac=0.8):
         
     # now we need to call on the function to be applied to the data frame
     # we do this by applying it to each row, using the apply function
-    df['sample'] = df['id_column'].apply(assign_split)
+    df['sample'] = df[id_column].apply(assign_split)
 
     return df
