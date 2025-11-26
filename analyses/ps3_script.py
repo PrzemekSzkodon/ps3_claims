@@ -1,16 +1,6 @@
-# Run this in the same notebook/interpreter where you click "Run Cell"
-import sys, os, importlib, site
-
-print("sys.executable:", sys.executable)          # Interpreter path used by the kernel
-print("sys.version:", sys.version.splitlines()[0])
-print("cwd:", os.getcwd())                        # Current working directory
-print("sys.path head:", sys.path[:5])             # First few entries of sys.path
-spec = importlib.util.find_spec("ps3")
-print("ps3 spec:", spec)
-if spec:
-    print("ps3 origin:", spec.origin)
-    print("ps3 package dirs:", spec.submodule_search_locations)
-print("site packages:", getattr(site, 'getsitepackages', lambda: 'NA')())
+import sys, importlib
+print(sys.executable)
+print(importlib.util.find_spec("ps3"))
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,15 +21,24 @@ from ps3.data import create_sample_split, load_transform
 df = load_transform()
 
 # %%
+# Let's have a look at the data
+print(df.shape)
+df.head()
+
+# %%
 # Train benchmark tweedie model. This is entirely based on the glum tutorial.
-weight = df["Exposure"].values
+weight = df["Exposure"].values #the exposure column was like 200 days and will convert to lik a 0.66 value (frac of year)
 df["PurePremium"] = df["ClaimAmountCut"] / df["Exposure"]
 y = df["PurePremium"]
+
 # TODO: Why do you think, we divide by exposure here to arrive at our outcome variable?
+# By dividing by exposure, we standardize the claim amounts to a per-unit-time basis (e.g., per year).
+# This allows for a fair comparison of claim amounts across policies with different exposure periods,
 
-
+# %%
+# Fit a basic Tweedie GLM
 # TODO: use your create_sample_split function here
-# df = create_sample_split(...)
+df = create_sample_split(df)
 train = np.where(df["sample"] == "train")
 test = np.where(df["sample"] == "test")
 df_train = df.iloc[train].copy()
