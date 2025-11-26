@@ -1,62 +1,83 @@
+import os
 import numpy as np
 import pandas as pd
 
+try:
+    from huggingface_hub import hf_hub_download
+    _HAS_HF = True
+except Exception:
+    hf_hub_download = None
+    _HAS_HF = False
+
+
+def _read_local_or_remote(freq_local, sev_local):
+    """Helper to try local, HF dataset URL, hf_hub_download, then OpenML."""
+    # 1) local
+    if os.path.exists(freq_local) and os.path.exists(sev_local):
+        df = pd.read_csv(freq_local)
+        df_sev = pd.read_csv(sev_local, index_col=0)
+        return df, df_sev, "local"
+
+    # 2) direct HF dataset URL (public)
+    hf_freq_url = "https://huggingface.co/datasets/mabilton/fremtpl2/resolve/main/freMTPL2freq.csv"
+    hf_sev_url = "https://huggingface.co/datasets/mabilton/fremtpl2/resolve/main/freMTPL2sev.csv"
+    try:
+        df = pd.read_csv(hf_freq_url)
+        df_sev = pd.read_csv(hf_sev_url, index_col=0)
+        return df, df_sev, "hf_url"
+    except Exception:
+        pass
+
+    # 3) huggingface_hub (if installed and allowed)
+    if _HAS_HF:
+        try:
+            freq_path = hf_hub_download(repo_id="mabilton/fremtpl2", filename="freMTPL2freq.csv", repo_type="dataset")
+            sev_path = hf_hub_download(repo_id="mabilton/fremtpl2", filename="freMTPL2sev.csv", repo_type="dataset")
+            df = pd.read_csv(freq_path)
+            df_sev = pd.read_csv(sev_path, index_col=0)
+            return df, df_sev, "hf_hub"
+        except Exception:
+            pass
+
+    # 4) fallback to OpenML URL
+    try:
+        df = pd.read_csv("https://www.openml.org/data/get_csv/20649148/freMTPL2freq.arff", quotechar="'")
+        df_sev = pd.read_csv("https://www.openml.org/data/get_csv/20649149/freMTPL2sev.arff", index_col=0)
+        return df, df_sev, "openml"
+    except Exception as e:
+        raise RuntimeError("Could not load dataset. Please download the CSVs and place them next to this script or ensure HF/OpenML access.") from e
+
+
 def load_transform():
-    """Load and transform data from OpenML.
+    """Load and transform data from OpenML or Hugging Face dataset.
 
-    Source: https://glum.readthedocs.io/en/latest/tutorials/glm_french_motor_tutorial/glm_french_motor.html#
-
-    Summary of transformations:
-
-    1. We cut the number of claims to a maximum of 4, as is done in the case study paper
-       (Case-study authors suspect a data error. See section 1 of their paper for
-       details).
-    2. We cut the exposure to a maximum of 1, as is done in the case study paper
-       (Case-study authors suspect a data error. See section 1 of their paper for
-       details).
-    3. We define ``'ClaimAmountCut'`` as the the claim amount cut at 100'000 per
-       single claim (before aggregation per policy). Reason: For large claims,
-       extreme value theory might apply. 100'000 is the 0.9984 quantile, any claims
-       larger account for 25% of the overall claim amount. This is a well known
-       phenomenon for third-party liability.
-    4. We aggregate the total claim amounts per policy ID and join them to
-       ``freMTPL2freq``.
-    5. We fix ``'ClaimNb'`` as the claim number with claim amount greater zero.
-    6. ``'VehPower'``, ``'VehAge'``, and ``'DrivAge'`` are clipped and/or digitized
-       into bins so they can be used as categoricals later on.
+    - Tries local files next to this script
+    - Tries HF dataset HTTP resolve URL (no auth required for public datasets)
+    - Tries huggingface_hub to fetch files (requires package and access)
+    - Falls back to OpenML URL (if available)
     """
-    # load the datasets
-    # first row (=column names) uses "", all other rows use ''
-    # use '' as quotechar as it is easier to change column names
-    df = pd.read_csv(
-        "https://www.openml.org/data/get_csv/20649148/freMTPL2freq.arff", quotechar="'"
-    )
+
+    # Local fallback paths (script directory)
+    this_dir = os.path.dirname(__file__)
+    local_freq = os.path.join(this_dir, "freMTPL2freq.csv")
+    local_sev = os.path.join(this_dir, "freMTPL2sev.csv")
+
+    df, df_sev, source = _read_local_or_remote(local_freq, local_sev)
 
     # rename column names '"name"' => 'name'
-    df = df.rename(lambda x: x.replace('"', ""), axis="columns")
+    df = df.rename(lambda x: x.replace('"', ''), axis="columns")
     df["IDpol"] = df["IDpol"].astype(np.int64)
     df.set_index("IDpol", inplace=True)
 
-    df_sev = pd.read_csv(
-        "https://www.openml.org/data/get_csv/20649149/freMTPL2sev.arff", index_col=0
-    )
-
     # join ClaimAmount from df_sev to df:
-    #   1. cut ClaimAmount at 100_000
-    #   2. aggregate ClaimAmount per IDpol
-    #   3. join by IDpol
     df_sev["ClaimAmountCut"] = df_sev["ClaimAmount"].clip(upper=100_000)
     df = df.join(df_sev.groupby(level=0).sum(), how="left")
     df.fillna(value={"ClaimAmount": 0, "ClaimAmountCut": 0}, inplace=True)
 
     # Note: Zero claims must be ignored in severity models,
-    # because the support is (0, inf) not [0, inf).
     df.loc[(df.ClaimAmount <= 0) & (df.ClaimNb >= 1), "ClaimNb"] = 0
 
-    # correct for unreasonable observations (that might be data error)
-    # see case study paper
-    df["ClaimNb"] = df["ClaimNb"].clip(upper=4)
-    df["Exposure"] = df["Exposure"].clip(upper=1)
+        # correct for unreasonable observations (that might be data error)
 
     # Clip and/or digitize predictors into bins
     df["VehPower"] = np.minimum(df["VehPower"], 9)
@@ -66,9 +87,13 @@ def load_transform():
     df["DrivAge"] = np.digitize(df["DrivAge"], bins=[21, 26, 31, 41, 51, 71])
 
     df = df.reset_index()
-
     return df
 
-data = load_transform()
-pd.set_option('display.max_columns', None)
-print(data.describe(include='all'))
+
+if __name__ == "__main__":
+    data = load_transform()
+    pd.set_option('display.max_columns', None)
+
+    print(data.describe(include='all'))
+
+        # no duplicate content below
