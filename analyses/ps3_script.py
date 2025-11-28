@@ -1061,11 +1061,199 @@ Next Steps (Optional):
 
 ================================
 """)
+# %%
 
 # Optional: Save PDP plots to disk (uncomment if needed)
-# fig_bonus.write_html("pdp_bonusmalus_comparison.html")
-# fig_density.write_html("pdp_density_comparison.html")
-# fig_all.write_html("pdp_all_features_comparison.html")
-# fig_vi.write_html("permutation_importance_comparison.html")
+fig_bonus.write_html("pdp_bonusmalus_comparison.html")
+fig_density.write_html("pdp_density_comparison.html")
+fig_all.write_html("pdp_all_features_comparison.html")
+fig_vi.write_html("permutation_importance_comparison.html")
+
+# %%
+# =============================================================
+# Ex 5: SHAP Value Decomposition (Local Explanations)
+# =============================================================
+# Objective: Understand individual prediction breakdowns for specific policies.
+# SHAP values show additive feature contributions: prediction = baseline + Σ(SHAP values)
+#
+# Key advantages:
+#  - Additive: Each feature's contribution is explicit and sums to final prediction
+#  - Local: Explains ONE specific prediction (vs PDP which shows global averages)
+#  - Model-agnostic: Works for any model (GLM, LGBM, neural nets)
+#  - Theoretically grounded: Based on cooperative game theory (Shapley values)
+#
+# Use case: "Why did this specific driver get a 420€ premium instead of 350€?"
+# Answer: "BonusMalus +50€, Young driver +30€, Urban density +20€, ..."
+
+print("\n=== SHAP Value Analysis for Individual Predictions ===")
+
+# Step 1: Create DALEX explainer for GLM benchmark
+# We need to prepare data in the same format GLM expects (categorized)
+print("Creating GLM explainer...")
+
+# GLM uses categorized data (from glm_categorizer)
+exp_glm = dx.Explainer(
+    model=t_glm1,  # Your original GLM model
+    data=X_test_t,  # Categorized test features
+    y=y_test_t,
+    label="GLM Benchmark",
+    verbose=False
+)
+
+# LGBM explainer already exists from Ex 4 (exp_constrained)
+# It uses X_test_lgb (one-hot encoded features)
+
+# Step 2: Select observation for detailed analysis
+# Choose first row of test set (index 0)
+print("Selecting observation: First policy in test set")
+
+obs_index = 0
+obs_glm = X_test_t.iloc[[obs_index]]  # GLM format (categorized)
+obs_lgbm = X_test_lgb.iloc[[obs_index]]  # LGBM format (one-hot)
+
+# Get actual values for context
+actual_premium = y_test_t.iloc[obs_index]
+actual_exposure = w_test_t[obs_index]
+
+print(f"\nObservation Details (Test Set Row {obs_index}):")
+print(f"  Actual Pure Premium: {actual_premium:.2f}€")
+print(f"  Exposure: {actual_exposure:.3f} years")
+print(f"  GLM Prediction: {t_glm1.predict(obs_glm)[0]:.2f}€")
+print(f"  LGBM Prediction: {gs_constrained.best_estimator_.predict(obs_lgbm)[0]:.2f}€")
+
+# Display key features for this observation
+print(f"\nKey Features for This Policy:")
+if 'BonusMalus' in X_test_lgb.columns:
+    print(f"  BonusMalus: {obs_lgbm['BonusMalus'].values[0]}")
+if 'Density' in X_test_lgb.columns:
+    print(f"  Density: {obs_lgbm['Density'].values[0]:.0f}")
+# Show categorical indicators that are "on" (=1)
+categorical_features = [col for col in obs_lgbm.columns if obs_lgbm[col].values[0] == 1]
+if categorical_features:
+    print(f"  Active Categories: {', '.join(categorical_features[:5])}")
+
+# Step 3: Compute SHAP values using DALEX predict_parts
+print("\nComputing SHAP values (this may take 1-2 minutes per model)...")
+
+# GLM SHAP decomposition
+shap_glm = exp_glm.predict_parts(
+    new_observation=obs_glm,
+    type='shap',
+    B=25  # Number of random permutations (increase for stability, decrease for speed)
+)
+
+# LGBM SHAP decomposition
+shap_lgbm = exp_constrained.predict_parts(
+    new_observation=obs_lgbm,
+    type='shap',
+    B=25
+)
+
+print("SHAP computation complete.")
+
+# Step 4: Plot SHAP decompositions
+print("Generating SHAP waterfall plots...")
+
+# GLM SHAP plot
+fig_shap_glm = shap_glm.plot(show=False, title=f"GLM SHAP Decomposition (Test Row {obs_index})")
+try:
+    fig_shap_glm.show()
+except ValueError:
+    pass
+
+# LGBM SHAP plot
+fig_shap_lgbm = shap_lgbm.plot(show=False, title=f"LGBM Constrained SHAP Decomposition (Test Row {obs_index})")
+try:
+    fig_shap_lgbm.show()
+except ValueError:
+    pass
+
+# Step 5: Extract top contributing features for comparison
+print("\n=== Top Feature Contributions Comparison ===")
+
+# DALEX stores SHAP values in .result DataFrame
+shap_glm_values = shap_glm.result.sort_values('contribution', ascending=False, key=abs)
+shap_lgbm_values = shap_lgbm.result.sort_values('contribution', ascending=False, key=abs)
+
+print("\nGLM Benchmark - Top 5 Features:")
+for idx, row in shap_glm_values.head(5).iterrows():
+    print(f"  {row['variable_name']}: {row['contribution']:+.2f}€ (value={row['variable_value']})")
+
+print("\nLGBM Constrained - Top 5 Features:")
+for idx, row in shap_lgbm_values.head(5).iterrows():
+    print(f"  {row['variable_name']}: {row['contribution']:+.2f}€ (value={row['variable_value']})")
+
+# Step 6: Optional - Analyze multiple observations
+print("\n=== SHAP Analysis for Additional Observations (Optional) ===")
+print("Analyzing 3 diverse policies...")
+
+# Select 3 observations: low risk, medium risk, high risk
+low_risk_idx = df_test['pp_t_lgbm_constrained'].idxmin()  # Lowest predicted premium
+high_risk_idx = df_test['pp_t_lgbm_constrained'].idxmax()  # Highest predicted premium
+median_risk_idx = df_test['pp_t_lgbm_constrained'].median()  # Find closest to median
+median_risk_idx = (df_test['pp_t_lgbm_constrained'] - median_risk_idx).abs().idxmin()
+
+# Convert to test set positions
+test_indices = df_test.index
+low_pos = test_indices.get_loc(low_risk_idx)
+high_pos = test_indices.get_loc(high_risk_idx)
+median_pos = test_indices.get_loc(median_risk_idx)
+
+for risk_label, pos in [("Low Risk", low_pos), ("Median Risk", median_pos), ("High Risk", high_pos)]:
+    obs = X_test_lgb.iloc[[pos]]
+    pred = gs_constrained.best_estimator_.predict(obs)[0]
+    print(f"\n{risk_label} Policy (Position {pos}):")
+    print(f"  Predicted Premium: {pred:.2f}€")
+    
+    # Quick SHAP (fewer permutations for speed)
+    shap_obs = exp_constrained.predict_parts(obs, type='shap', B=10)
+    top_features = shap_obs.result.sort_values('contribution', ascending=False, key=abs).head(3)
+    
+    print(f"  Top 3 Drivers:")
+    for idx, row in top_features.iterrows():
+        print(f"    {row['variable_name']}: {row['contribution']:+.2f}€")
+
+# Step 7: Interpretation Guide
+print("""
+=== SHAP Interpretation Guide ===
+
+What SHAP Values Show:
+ - Baseline prediction: Average prediction across all test policies (intercept)
+ - Feature contributions: How much each feature pushes prediction above/below baseline
+ - Additivity: Baseline + Σ(SHAP values) = Final prediction (exactly!)
+
+GLM vs LGBM Comparison:
+ 1. Feature Importance Ranking:
+    - Do both models agree on top drivers (e.g., BonusMalus most important)?
+    - If rankings differ substantially, constraint may have redistributed importance
+ 
+ 2. Contribution Magnitudes:
+    - GLM: Linear contributions (each unit of BonusMalus adds fixed amount)
+    - LGBM: Non-linear contributions (BonusMalus effect depends on other features)
+ 
+ 3. Sign Consistency:
+    - Both should show BonusMalus > 0 (higher score → higher premium)
+    - If signs flip for any feature, investigate constraint impact or model bug
+ 
+ 4. Interaction Evidence:
+    - LGBM may have larger contributions for secondary features (captures interactions)
+    - GLM contributions sum to fewer features (strict additivity, no interactions)
+
+Business Use Cases:
+ - Customer inquiry: "Why is my premium 420€?" → Show SHAP waterfall
+ - Regulatory audit: "Prove model doesn't discriminate by region" → SHAP values reveal regional contribution is small
+ - Model debugging: "Why did premium spike for this policy?" → SHAP identifies outlier feature value
+
+Next Steps:
+ - Save SHAP plots for report: fig_shap_glm.write_html("shap_glm_obs0.html")
+ - Compute SHAP for entire test set (expensive!): Use shap.summary_plot for distributions
+ - Compare SHAP distributions between constrained/unconstrained: Check if constraint changed typical contributions
+
+================================
+""")
+
+# Optional: Save SHAP plots to disk
+# fig_shap_glm.write_html(f"shap_glm_observation_{obs_index}.html")
+# fig_shap_lgbm.write_html(f"shap_lgbm_observation_{obs_index}.html")
 
 # %%
