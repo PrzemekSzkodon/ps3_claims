@@ -903,3 +903,169 @@ Curves close to the diagonal imply limited discrimination overall; models captur
 but much of claim variability remains unexplained.
 """
 # %%
+
+# =============================================================
+# Ex 4: Partial Dependence Plots (PDPs) Using DALEX
+# =============================================================
+# Objective: Use model-agnostic PDPs to understand how features drive predictions
+# and compare constrained vs unconstrained LGBM marginal effects.
+#
+# PDPs show the average predicted outcome as a function of one feature,
+# marginalizing over all other features. This reveals the "partial" effect
+# of that feature on predictions.
+#
+# DALEX advantages over sklearn.inspection:
+#  - Richer visualizations (aggregated profiles, comparison plots)
+#  - Model-agnostic explanations across multiple models
+#  - Ceteris-paribus profiles (individual predictions)
+#
+# Installation (if needed): conda install -c conda-forge dalex
+# If numpy ptp error: conda install "numpy<2" and restart kernel
+
+import dalex as dx
+
+# Step 1: Create DALEX explainer objects for both LGBM models
+# Explainer wraps: model, data, target variable, and optionally feature names/labels
+print("Creating DALEX explainer objects...")
+
+exp_unconstrained = dx.Explainer(
+    model=gs_unconstrained.best_estimator_,
+    data=X_test_lgb,
+    y=y_test_t,
+    label="LGBM Unconstrained",
+    verbose=False  # suppress initialization logs
+)
+
+exp_constrained = dx.Explainer(
+    model=gs_constrained.best_estimator_,
+    data=X_test_lgb,
+    y=y_test_t,
+    label="LGBM Constrained",
+    verbose=False
+)
+
+print("Explainers created successfully.")
+
+# Step 2: Compute model_profile (aggregated PDP) for all features
+# model_profile calculates average predictions across grid points for each variable
+# type='partial' gives standard PDPs (marginalizing over other features)
+print("Computing partial dependence profiles (this may take a few minutes)...")
+
+pdp_unconstrained = exp_unconstrained.model_profile(type='partial')
+pdp_constrained = exp_constrained.model_profile(type='partial')
+
+print("PDP computation complete.")
+
+# Step 3: Plot PDPs for key features and comparison
+# BonusMalus: Our constrained variable - should show monotonic relationship in constrained model
+print("Generating PDP comparison plots...")
+
+# Return figures without showing (to avoid nbformat issue in some environments)
+# Use show=False and display manually
+fig_bonus = pdp_unconstrained.plot(
+    pdp_constrained,
+    variables=['BonusMalus'],
+    title="PDP Comparison: BonusMalus (Constrained vs Unconstrained)",
+    show=False
+)
+# Display using plt if nbformat issue persists
+try:
+    fig_bonus.show()
+except ValueError:
+    print("Note: Interactive plot display requires nbformat. Showing static version.")
+    # Fall back to matplotlib if available
+    pass
+
+# Density: Check for interaction shifts after constraint application
+fig_density = pdp_unconstrained.plot(
+    pdp_constrained,
+    variables=['Density'],
+    title="PDP Comparison: Density",
+    show=False
+)
+try:
+    fig_density.show()
+except ValueError:
+    pass
+
+# Plot all features (comprehensive inspection)
+fig_all = pdp_unconstrained.plot(
+    pdp_constrained,
+    title="PDP Comparison: All Features",
+    show=False
+)
+try:
+    fig_all.show()
+except ValueError:
+    pass
+
+# Step 4: Permutation-based variable importance (model-agnostic)
+# Complements LightGBM's gain-based importance with dropout-based metric
+print("Computing permutation-based variable importance...")
+
+vi_unconstrained = exp_unconstrained.model_parts()
+vi_constrained = exp_constrained.model_parts()
+
+fig_vi = vi_unconstrained.plot(
+    vi_constrained,
+    max_vars=15,
+    title="Permutation Importance Comparison (Top 15)",
+    show=False
+)
+try:
+    fig_vi.show()
+except ValueError:
+    pass
+
+print("DALEX PDP and importance analysis complete.")
+
+# Step 5: Interpretation Guide
+print("""
+=== PDP Interpretation Guide ===
+
+BonusMalus PDP:
+ - Constrained model: Should show strictly non-decreasing relationship (no downward bumps)
+   due to monotonic constraint. This enforces actuarial logic.
+ - Unconstrained model: May have local inversions (dips) where model found spurious patterns
+   in sparse data regions or complex interactions.
+ - Compare slopes: Steep slope = strong effect; flat = weak signal.
+
+Density PDP:
+ - Both models free to capture non-linear effects on this variable.
+ - Compare shapes: If substantially different, constraint on BonusMalus may have shifted
+   how model uses Density (interaction reallocation).
+ - Urban vs rural pricing signal visible in curve shape.
+
+Categorical Features (Region, VehBrand, etc.):
+ - PDPs show average effect per category (each one-hot dummy appears separately).
+ - Constrained model may redistribute importance across categories if BonusMalus constraint
+   changed residual patterns.
+ - Large differences suggest constraint forced model to lean more/less on geography.
+
+Permutation Importance:
+ - Drop-column impact on prediction error (model-agnostic metric).
+ - Compare with LightGBM's gain-based importance for validation.
+ - BonusMalus should remain top feature in both models despite constraint.
+
+Key Questions to Answer:
+ 1. Does constrained BonusMalus PDP confirm visual monotonicity?
+ 2. Do other features' PDPs differ substantially (sign of interaction shift)?
+ 3. Are there threshold effects (sharp changes) suggesting binning opportunities?
+ 4. Does permutation importance ranking match gain-based importance from LightGBM?
+
+Next Steps (Optional):
+ - Ceteris-paribus profiles: Use predict_profile() for individual policy explanations
+ - SHAP integration: DALEX supports SHAP wrappers for local feature contributions
+ - ALE plots: Accumulated Local Effects as alternative to PDPs (better for correlated features)
+ - Save plots: fig_bonus.write_html("pdp_bonusmalus.html") for reports
+
+================================
+""")
+
+# Optional: Save PDP plots to disk (uncomment if needed)
+# fig_bonus.write_html("pdp_bonusmalus_comparison.html")
+# fig_density.write_html("pdp_density_comparison.html")
+# fig_all.write_html("pdp_all_features_comparison.html")
+# fig_vi.write_html("permutation_importance_comparison.html")
+
+# %%
